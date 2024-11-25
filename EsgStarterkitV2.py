@@ -757,7 +757,7 @@ def generate_advisory_analysis(user_data, all_analyses, api_key):
     {user_data}
     {all_analyses}
     
-     (700 words): Explain what and how ESG Advisory team can assist, including:
+     (690 words): Explain what and how ESG Advisory team can assist, including:
     - Implementation support methods
     - Technical expertise areas
     - Training programs
