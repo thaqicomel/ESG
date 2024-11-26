@@ -195,9 +195,13 @@ def generate_pdf(esg_data, personal_info, toc_page_numbers):
         title_with_num = f"{num}. {title}"
         dots = '.' * (50 - len(title_with_num))
         return f"{title_with_num} {dots} {page_num}"
-    
-    # Add TOC entries with manual page numbers
-    for i, ((title, _), page_num) in enumerate(zip(section_data, toc_page_numbers), 1):
+
+    # First add the static Executive Summary entry
+    static_entry = create_toc_entry(1, "Profile Analysis", 3)  # 3 is the page number
+    elements.append(Paragraph(static_entry, toc_style))
+
+    # Then continue with the dynamic entries, starting from number 2
+    for i, ((title, _), page_num) in enumerate(zip(section_data, toc_page_numbers), 2):
         toc_entry = create_toc_entry(i, title, page_num)
         elements.append(Paragraph(toc_entry, toc_style))
     
@@ -276,25 +280,25 @@ def create_disclaimer_page(styles, elements):
             fontName=bold_font,
             leading=28,
             spaceBefore=0,
-            spaceAfter=20,
+            spaceAfter=10,
         ),
         'section_header': ParagraphStyle(
             'SectionHeader',
             parent=styles['normal'],
             fontSize=10,
             fontName=bold_font,
-            leading=14,
-            spaceBefore=12,
-            spaceAfter=8,
+            leading=13,
+            spaceBefore=2,
+            spaceAfter=3,
         ),
         'body_text': ParagraphStyle(
             'BodyText',
             parent=styles['normal'],
             fontSize=8,
             fontName=base_font,
-            leading=11,
+            leading=10,
             spaceBefore=1,
-            spaceAfter=5,
+            spaceAfter=3,
             alignment=TA_JUSTIFY,
         ),
         'item_header': ParagraphStyle(
@@ -302,9 +306,9 @@ def create_disclaimer_page(styles, elements):
             parent=styles['normal'],
             fontSize=8,
             fontName=bold_font,
-            leading=12,
-            spaceBefore=6,
-            spaceAfter=2,
+            leading=11,
+            spaceBefore=4,
+            spaceAfter=1,
         ),
         'confidential': ParagraphStyle(
             'Confidential',
@@ -313,7 +317,7 @@ def create_disclaimer_page(styles, elements):
             fontName=base_font,
             textColor=colors.black,
             alignment=TA_CENTER,
-            spaceBefore=10,
+            spaceBefore=1,
         )
     }    
     # Main Content
@@ -531,7 +535,7 @@ def create_custom_styles():
         'heading': ParagraphStyle(
             'CustomHeading',
             parent=base_styles['Normal'],
-            fontSize=27,
+            fontSize=26,
             textColor=colors.HexColor('#1a1a1a'),
             spaceBefore=20,
             spaceAfter=15,
@@ -542,7 +546,7 @@ def create_custom_styles():
         'subheading': ParagraphStyle(
             'CustomSubheading',
             parent=base_styles['Normal'],
-            fontSize=13,
+            fontSize=12,
             textColor=colors.HexColor('#4A5568'),
             spaceBefore=15,
             spaceAfter=10,
@@ -552,7 +556,7 @@ def create_custom_styles():
         'normal': ParagraphStyle(
             'CustomNormal',
             parent=base_styles['Normal'],
-            fontSize=11,
+            fontSize=10,
             textColor=colors.HexColor('#1a1a1a'),
             spaceBefore=6,
             spaceAfter=6,
@@ -563,7 +567,7 @@ def create_custom_styles():
         'content': ParagraphStyle(
             'CustomContent',
             parent=base_styles['Normal'],
-            fontSize=11,
+            fontSize=10,
             textColor=colors.HexColor('#1a1a1a'),
             alignment=TA_JUSTIFY,
             spaceBefore=6,
@@ -575,7 +579,7 @@ def create_custom_styles():
         'bullet': ParagraphStyle(
             'CustomBullet',
             parent=base_styles['Normal'],
-            fontSize=11,
+            fontSize=10,
             textColor=colors.HexColor('#1a1a1a'),
             leftIndent=20,
             firstLineIndent=0,
@@ -680,139 +684,6 @@ def process_content(content, styles, elements):
         else:
             elements.append(Paragraph(clean_para, styles['content']))
             elements.append(Spacer(1, 0.05*inch))
-# def create_contact_page(styles):
-#     """Create a beautifully designed contact page with fixed sizing."""
-#     elements = []
-    
-#     # Add a page break before contact page
-#     # elements.append(PageBreak())
-    
-#     # Create a colored background header
-#     elements.append(
-#         Table(
-#             [[Paragraph("Get in Touch", styles['heading'])]], 
-#             colWidths=[7*inch],
-#             style=TableStyle([
-#                 ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#F0F9FF')),
-#                 ('BOTTOMPADDING', (0, 0), (-1, -1), 20),
-#                 ('TOPPADDING', (0, 0), (-1, -1), 20),
-#                 ('LEFTPADDING', (0, 0), (-1, -1), 30),
-#             ])
-#         )
-#     )
-#     elements.append(Spacer(1, 0.3*inch))
-
-#     # Profile photo
-#     if os.path.exists("mizah.jpg"):
-#         description_style = ParagraphStyle(
-#             'ImageDescription',
-#             parent=styles['content'],
-#             fontSize=10,
-#             textColor=colors.HexColor('#1a1a1a'),
-#             alignment=TA_LEFT,
-#             leading=14
-#         )
-        
-#         description_text = Paragraph("""KerjayaKu: AI-Driven Career Guidance for a Strategic Future<br/>
-#             KerjayaKu is an AI-powered portal designed to help fresh graduates and young professionals strategically navigate their career development journey. 
-#             By integrating cutting-edge artificial intelligence, KerjayaKu assesses your education profile, aspirations, personality traits, current skillset, 
-#             and problem-solving abilities, along with social-emotional learning skills. It then delivers personalized insights to help you stay competitive 
-#             in today's dynamic job market.""", description_style)
-
-#         elements.append(
-#             Table(
-#                 [
-#                     [Image("mizah.jpg", width=1*inch, height=1*inch), ""],  # Image row
-#                     [description_text, ""]  # Description row below image
-#                 ],
-#                 colWidths=[1.5*inch, 5.5*inch],
-#                 style=TableStyle([
-#                     ('ALIGN', (0, 0), (0, 0), 'LEFT'),  # Align image to left
-#                     ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-#                     ('TOPPADDING', (0, 0), (-1, -1), 10),
-#                     ('BOTTOMPADDING', (0, 0), (-1, -1), 10),
-#                     ('LEFTPADDING', (0, 0), (-1, -1), 15),
-#                     ('SPAN', (0, 1), (1, 1)),  # Span description across both columns
-#                 ])
-#             )
-#         )
-#         elements.append(Spacer(1, 0.3*inch))
-
-#     # Contact information table
-#     contact_table_data = [
-#         # Label Cell, Value Cell
-#         [Paragraph("Name:", styles['content']),
-#          Paragraph("Monica Tiara Mittra", styles['content'])],
-
-#         [Paragraph("Address:", styles['content']),
-#          Paragraph("Project Coordinator,\nRAA Capital Partners Sdn Bhd", styles['content'])],
-        
-#         [Paragraph("Tel:", styles['content']),
-#          Paragraph("+60178833569", styles['content'])],
-        
-#         [Paragraph("Email:", styles['content']),
-#          Paragraph('<link href="mailto:monicamittra@raa-capital.com"><font color="#2563EB">monicamittra@raa-capital.com</font></link>', styles['content'])],
-        
-#         [Paragraph("Website:", styles['content']),
-#          Paragraph('<link href="https://www.google.com/maps"><font color="#2563EB">www.ceaiglobal.com</font></link>', styles['content'])]
-#     ]
-
-#     # Create the contact information table
-#     contact_table = Table(
-#         contact_table_data,
-#         colWidths=[1.5*inch, 5.8*inch],
-#         style=TableStyle([
-#             ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-#             ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-#             ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#FFFFFF')),
-#             ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#E2E8F0')),
-#             ('TEXTCOLOR', (0, 0), (0, -1), colors.HexColor('#2B6CB0')),  # Blue color for labels
-#             ('TOPPADDING', (0, 0), (-1, -1), 12),
-#             ('BOTTOMPADDING', (0, 0), (-1, -1), 12),
-#             ('LEFTPADDING', (0, 0), (-1, -1), 15),
-#             ('RIGHTPADDING', (0, 0), (-1, -1), 15),
-#         ])
-#     )
-    
-#     elements.append(contact_table)
-    
-#     # Footer
-#     elements.extend([
-#         Spacer(1, 0.5*inch),
-#         Table(
-#             [[Paragraph("Thank you for your interest!", 
-#                        ParagraphStyle(
-#                            'ThankYou',
-#                            parent=styles['subheading'],
-#                            alignment=TA_CENTER,
-#                            textColor=colors.HexColor('#2B6CB0')
-#                        ))]],
-#             colWidths=[7*inch],
-#             style=TableStyle([
-#                 ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-#                 ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#F0F9FF')),
-#                 ('BOTTOMPADDING', (0, 0), (-1, -1), 15),
-#                 ('TOPPADDING', (0, 0), (-1, -1), 15),
-#             ])
-#         ),
-#         # Spacer(1, 0.2*inch),
-#         # Table(
-#         #     [[Paragraph("© 2024 Centre for AI Innovation. All rights reserved.", 
-#         #                ParagraphStyle(
-#         #                    'Footer',
-#         #                    parent=styles['content'],
-#         #                    alignment=TA_CENTER,
-#         #                    textColor=colors.HexColor('#666666'),
-#         #                    fontSize=8
-#         #                ))]],
-#         #     colWidths=[7*inch],
-#         #     style=TableStyle([
-#         #         ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-#         #     ])
-#         # )
-#     ])
-    
-#     return elements
 def create_header_footer(canvas, doc):
     """Add header and footer with smaller, transparent images in the top right and a line below the header."""
     canvas.saveState()
@@ -961,8 +832,8 @@ def get_esg_analysis1(user_data, api_key):
     prompt = f"""Based on this organization's profile and ESG readiness responses:
     {user_data}
     
-    Provide a 600-word analysis with specific references to the data provided, formatted
-    in narrative form with headers and paragraphs."""
+    Provide a 565-word analysis with specific references to the data provided, formatted
+    in narrative form with headers and paragraphs.NO NUMBERING POINTS"""
 
     try:
         response = client.chat.completions.create(
@@ -1071,7 +942,7 @@ Please provide:
 4. Recommendations for prioritizing and harmonizing framework implementation
 5. Specific examples of how the organization can benefit from its multi-framework approach
 
-Write in narrative form (650 words) with headers and bullet points, including:
+Write in narrative form (500 words) with headers and Numbering points(no bullet points), including:
 - Supporting facts and figures
 - Specific references for each organization type
 - Cross-framework integration strategies
@@ -1097,8 +968,8 @@ def generate_management_questions(analysis1, analysis2, api_key):
     {analysis1}
     {analysis2}
     
-    Generate a list of top 10 issues/questions that Management should address.
-    Format as  600-words in narrative form with:
+    Generate a list of top 10 issues/questions that Management should address in numbering Points.
+    Format as  380-words in narrative form with:
     - Clear headers for key areas
     - Bullet points identifying specific issues
     - Supporting facts and figures
@@ -1124,7 +995,7 @@ def generate_question_rationale(questions, analysis1, analysis2, api_key):
     {analysis1}
     {analysis2}
     
-    Provide a 650-word explanation of why each issue needs to be addressed, with:
+    Provide a 640-word (no numbering points)explanation of why each issue needs to be addressed, with:
     - Specific references to ESG guidelines and standards
     - Industry best practices
     - Supporting facts and figures
@@ -1150,7 +1021,7 @@ def generate_implementation_challenges(analysis1, analysis2, questions, api_key)
     {analysis2}
     {questions}
     
-    Provide a 660-word analysis of potential ESG implementation challenges covering:
+    Provide a 640-word(no numbering points) analysis of potential ESG implementation challenges covering:
     1. Human Capital Availability and Expertise
     2. Budgeting and Financial Resources
     3. Infrastructure
@@ -1178,7 +1049,7 @@ def generate_advisory_analysis(user_data, all_analyses, api_key):
     {user_data}
     {all_analyses}
     
-     (570 words): Explain what and how ESG Advisory team can assist, including:
+     (480 words): Explain what and how ESG Advisory team can assist in numbering points, including:
     - Implementation support methods
     - Technical expertise areas
     - Training programs
@@ -1204,7 +1075,7 @@ def generate_sroi_analysis(user_data, all_analyses, api_key):
     {user_data}
     {all_analyses}
     
-    (740 words): Provide a Social Return on Investment (SROI) model with:
+    (730 words): Provide a Social Return on Investment (SROI) model with(in numbering points):
     1. Calculation Methodology:
     - Explain SROI calculations using plain text (avoid mathematical notation)
     - Example: "For every 1 dollar invested, X value is generated" instead of mathematical formulas
@@ -1455,7 +1326,7 @@ def main():
                                         'type': ', '.join(st.session_state.user_data['organization_types']),
                                         'date': datetime.datetime.now().strftime('%B %d, %Y')
                                     }
-                                    page_numbers = [4, 7, 10, 13, 16, 19] 
+                                    page_numbers = [4, 6, 8, 11, 13, 15] 
                                     pdf_buffer = generate_pdf(esg_data, personal_info,page_numbers)
                                     
                                     # Download button
