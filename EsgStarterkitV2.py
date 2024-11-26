@@ -17,6 +17,21 @@ from reportlab.platypus import (
     PageTemplate, Frame
 )
 from reportlab.lib.pagesizes import inch
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.platypus.tableofcontents import TableOfContents
+from reportlab.platypus import SimpleDocTemplate, Paragraph, PageBreak, Image, Frame
+from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+from reportlab.lib.units import inch
+from reportlab.lib.pagesizes import letter
+from reportlab.lib.enums import TA_CENTER
+import io
+import os
+from reportlab.pdfgen import canvas
+from reportlab.platypus import SimpleDocTemplate, PageTemplate, Frame, PageBreak, Image, Paragraph, NextPageTemplate
+from reportlab.lib.pagesizes import letter
+from reportlab.lib.units import inch
+from reportlab.pdfgen import canvas
 # Constants
 FIELDS_OF_INDUSTRY = [
     "Agriculture", "Forestry", "Fishing", "Mining and Quarrying",
@@ -77,12 +92,26 @@ ESG_READINESS_QUESTIONS = {
         "Regulatory complexity and compliance requirements."
     ]
 }
-def generate_pdf(esg_data, personal_info):
-    """Generate PDF with ESG analysis data"""
+class PDFWithTOC(SimpleDocTemplate):
+    def __init__(self, *args, **kwargs):
+        SimpleDocTemplate.__init__(self, *args, **kwargs)
+        self.page_numbers = {}
+        self.current_page = 1
+
+    def afterPage(self):
+        self.current_page += 1
+
+    def afterFlowable(self, flowable):
+        if isinstance(flowable, Paragraph):
+            style = flowable.style.name
+            if style == 'heading':
+                text = flowable.getPlainText()
+                self.page_numbers[text] = self.current_page
+
+def generate_pdf(esg_data, personal_info, toc_page_numbers):
     buffer = io.BytesIO()
     
-    # Create document
-    doc = SimpleDocTemplate(
+    doc = PDFWithTOC(
         buffer,
         pagesize=letter,
         rightMargin=inch,
@@ -91,16 +120,10 @@ def generate_pdf(esg_data, personal_info):
         bottomMargin=inch
     )
     
-    # Create frames
     full_page_frame = Frame(
-        0,              # x = 0
-        0,              # y = 0
-        letter[0],      # width = full page width
-        letter[1],      # height = full page height
-        leftPadding=0,
-        rightPadding=0,
-        topPadding=0,
-        bottomPadding=0
+        0, 0, letter[0], letter[1],
+        leftPadding=0, rightPadding=0,
+        topPadding=0, bottomPadding=0
     )
     
     normal_frame = Frame(
@@ -111,73 +134,252 @@ def generate_pdf(esg_data, personal_info):
         id='normal'
     )
     
-    # Create page templates
+    disclaimer_frame = Frame(
+        doc.leftMargin,
+        doc.bottomMargin,
+        doc.width,
+        doc.height,
+        id='disclaimer'
+    )
+    
     templates = [
-        PageTemplate(
-            id='First',
-            frames=[full_page_frame],
-            onPage=lambda canvas, doc: None  # No header/footer on first page
-        ),
-        PageTemplate(
-            id='Later',
-            frames=[normal_frame],
-            onPage=create_header_footer
-        )
+        PageTemplate(id='First', frames=[full_page_frame],
+                    onPage=lambda canvas, doc: None),
+        PageTemplate(id='Later', frames=[normal_frame],
+                    onPage=create_header_footer),
+        PageTemplate(id='dis', frames=[normal_frame],
+                    onPage=create_header_footer_disclaimer)
     ]
     doc.addPageTemplates(templates)
     
     styles = create_custom_styles()
+    
+    # TOC style with right alignment for page numbers
+    toc_style = ParagraphStyle(
+        'TOCEntry',
+        parent=styles['normal'],
+        fontSize=12,
+        leading=20,
+        leftIndent=20,
+        rightIndent=30,
+        spaceBefore=10,
+        spaceAfter=10,
+        fontName='Helvetica'
+    )
+    styles['toc'] = toc_style
+    
     elements = []
     
-    # Cover page setup
+    # Cover page
     elements.append(NextPageTemplate('First'))
-    
-    # Cover page with full-page image
-    if os.path.exists("frontemma.png"):
-        img = Image(
-            "frontemma.png",
-            width=letter[0],
-            height=letter[1]
-        )
+    if os.path.exists("frontemma.jpg"):
+        img = Image("frontemma.jpg", width=letter[0], height=letter[1])
         elements.append(img)
     
-    # Important: Set the Later template before the page break
     elements.append(NextPageTemplate('Later'))
     elements.append(PageBreak())
+    elements.append(Paragraph("Table of Contents", styles['heading']))
     
-    # Initial ESG Assessment - now will use Later template
-    elements.append(Paragraph("ESG Initial Assessment", styles['heading']))
-    process_content(esg_data['analysis1'], styles, elements)
+    # Section data
+    section_data = [
+        ("ESG Initial Assessment", esg_data['analysis1']),
+        ("Framework Analysis", esg_data['analysis2']),
+        ("Management Issues", esg_data['management_questions']),
+        ("Implementation Challenges", esg_data['implementation_challenges']),
+        ("Advisory Plan", esg_data['advisory']),
+        ("SROI Analysis", esg_data['sroi'])
+    ]
+    
+    # Format TOC entries with dots and manual page numbers
+    def create_toc_entry(num, title, page_num):
+        title_with_num = f"{num}. {title}"
+        dots = '.' * (50 - len(title_with_num))
+        return f"{title_with_num} {dots} {page_num}"
+    
+    # Add TOC entries with manual page numbers
+    for i, ((title, _), page_num) in enumerate(zip(section_data, toc_page_numbers), 1):
+        toc_entry = create_toc_entry(i, title, page_num)
+        elements.append(Paragraph(toc_entry, toc_style))
+    
     elements.append(PageBreak())
     
-    # Rest of the content (no need to keep setting Later template)
-    elements.append(Paragraph("Framework Analysis", styles['heading']))
-    process_content(esg_data['analysis2'], styles, elements)
+    # Content pages
+    elements.extend(create_second_page(styles, personal_info))
     elements.append(PageBreak())
     
-    elements.append(Paragraph("Management Issues", styles['heading']))
-    process_content(esg_data['management_questions'], styles, elements)
-    elements.append(PageBreak())
+    # Main content
+    for i, (title, content) in enumerate(section_data):
+        elements.append(Paragraph(title, styles['heading']))
+        process_content(content, styles, elements)
+        if i < len(section_data) - 1:
+            elements.append(PageBreak())
     
-    elements.append(Paragraph("Implementation Challenges", styles['heading']))
-    process_content(esg_data['implementation_challenges'], styles, elements)
+    # Disclaimer
+    elements.append(NextPageTemplate('dis'))
     elements.append(PageBreak())
+    create_disclaimer_page(styles, elements)
     
-    elements.append(Paragraph("Advisory Plan", styles['heading']))
-    process_content(esg_data['advisory'], styles, elements)
+    # Back cover
+    elements.append(NextPageTemplate('First'))
     elements.append(PageBreak())
-
-    elements.append(Paragraph("SROI Analysis", styles['heading']))
-    process_content(esg_data['sroi'], styles, elements)
-    elements.append(PageBreak())
+    if os.path.exists("backemma.png"):
+        img = Image("backemma.png", width=letter[0], height=letter[1])
+        elements.append(img)
     
-    # Contact page
-    elements.extend(create_contact_page(styles))
-    
-    # Build PDF
-    doc.build(elements)
+    doc.build(elements, canvasmaker=NumberedCanvas)
     buffer.seek(0)
     return buffer
+
+class NumberedCanvas(canvas.Canvas):
+    def __init__(self, *args, **kwargs):
+        canvas.Canvas.__init__(self, *args, **kwargs)
+        self._saved_page_states = []
+
+    def showPage(self):
+        self._saved_page_states.append(dict(self.__dict__))
+        self._startPage()
+
+    def save(self):
+        num_pages = len(self._saved_page_states)
+        for state in self._saved_page_states:
+            self.__dict__.update(state)
+            self.draw_page_number(num_pages)
+            canvas.Canvas.showPage(self)
+        canvas.Canvas.save(self)
+
+    def draw_page_number(self, page_count):
+        if hasattr(self, '_pageNumber'):
+            self.setFont("Helvetica", 9)
+
+
+
+def create_disclaimer_page(styles, elements):
+    """Create a single-page disclaimer using Lato font family"""
+    
+    # Register Lato fonts
+    try:
+        pdfmetrics.registerFont(TTFont('Lato', 'fonts/Lato-Regular.ttf'))
+        pdfmetrics.registerFont(TTFont('Lato-Bold', 'fonts/Lato-Bold.ttf'))
+        base_font = 'Lato'
+        bold_font = 'Lato-Bold'
+    except:
+        # Fallback to Helvetica if Lato fonts are not available
+        base_font = 'Helvetica'
+        bold_font = 'Helvetica-Bold'
+    
+    # Define custom styles for the disclaimer page with Lato
+    disclaimer_styles = {
+        'title': ParagraphStyle(
+            'DisclaimerTitle',
+            parent=styles['normal'],
+            fontSize=24,
+            fontName=bold_font,
+            leading=28,
+            spaceBefore=0,
+            spaceAfter=20,
+        ),
+        'section_header': ParagraphStyle(
+            'SectionHeader',
+            parent=styles['normal'],
+            fontSize=10,
+            fontName=bold_font,
+            leading=14,
+            spaceBefore=12,
+            spaceAfter=8,
+        ),
+        'body_text': ParagraphStyle(
+            'BodyText',
+            parent=styles['normal'],
+            fontSize=8,
+            fontName=base_font,
+            leading=11,
+            spaceBefore=1,
+            spaceAfter=5,
+            alignment=TA_JUSTIFY,
+        ),
+        'item_header': ParagraphStyle(
+            'ItemHeader',
+            parent=styles['normal'],
+            fontSize=8,
+            fontName=bold_font,
+            leading=12,
+            spaceBefore=6,
+            spaceAfter=2,
+        ),
+        'confidential': ParagraphStyle(
+            'Confidential',
+            parent=styles['normal'],
+            fontSize=8,
+            fontName=base_font,
+            textColor=colors.black,
+            alignment=TA_CENTER,
+            spaceBefore=10,
+        )
+    }    
+    # Main Content
+    elements.append(Paragraph("Limitations of AI in Financial and Strategic Evaluations", 
+                            disclaimer_styles['section_header']))
+
+    # AI Limitations Section
+    limitations = [
+        ("1. Data Dependency and Quality",
+         "AI models rely heavily on the quality and completeness of the data fed into them. The accuracy of the analysis is contingent upon the integrity of the input data. Inaccurate, outdated, or incomplete data can lead to erroneous conclusions and recommendations. Users should ensure that the data used in AI evaluations is accurate and up-to-date."),
+        
+        ("2. Algorithmic Bias and Limitations",
+         "AI algorithms are designed based on historical data and predefined models. They may inadvertently incorporate biases present in the data, leading to skewed results. Additionally, AI models might not fully capture the complexity and nuances of human behavior or unexpected market changes, potentially impacting the reliability of the analysis."),
+        
+        ("3. Predictive Limitations",
+         "While AI can identify patterns and trends, it cannot predict future events with certainty. Financial markets and business environments are influenced by numerous unpredictable factors such as geopolitical events, economic fluctuations, and technological advancements. AI's predictions are probabilistic and should not be construed as definitive forecasts."),
+        
+        ("4. Interpretation of Results",
+         "AI-generated reports and analyses require careful interpretation. The insights provided by AI tools are based on algorithms and statistical models, which may not always align with real-world scenarios. It is essential to involve human expertise in interpreting AI outputs and making informed decisions."),
+        
+        ("5. Compliance and Regulatory Considerations",
+         "The use of AI in financial evaluations and business strategy formulation must comply with relevant regulations and standards. Users should be aware of legal and regulatory requirements applicable to AI applications in their jurisdiction and ensure that their use of AI tools aligns with these requirements.")
+    ]
+
+    for title, content in limitations:
+        elements.append(Paragraph(title, disclaimer_styles['item_header']))
+        elements.append(Paragraph(content, disclaimer_styles['body_text']))
+
+    # RAA Capital Partners Section
+    elements.append(Paragraph("RAA Capital Partners Sdn Bhd and Advisory Partners' Disclaimer",
+                            disclaimer_styles['section_header']))
+
+    elements.append(Paragraph(
+        "RAA Capital Partners Sdn Bhd, Centre for AI Innovation (CEAI) and its advisory partners provide AI-generated reports and insights as a tool to assist in financial and business strategy evaluations. However, the use of these AI-generated analyses is subject to the following disclaimers:",
+        disclaimer_styles['body_text']
+    ))
+
+    disclaimers = [
+        ("1. No Guarantee of Accuracy or Completeness",
+         "While RAA Capital Partners Sdn Bhd, Centre for AI Innovation (CEAI) and its advisory partners strive to ensure that the AI-generated reports and insights are accurate and reliable, we do not guarantee the completeness or accuracy of the information provided. The insights are based on the data and models used, which may not fully account for all relevant factors or changes in the market."),
+        
+        ("2. Not Financial or Professional Advice",
+         "The AI-generated reports and insights are not intended as financial, investment, legal, or professional advice. Users should consult with qualified professionals before making any financial or strategic decisions based on AI-generated reports. RAA Capital Partners Sdn Bhd, Centre for AI Innovation (CEAI) and its advisory partners are not responsible for any decisions made based on the reports provided."),
+        
+        ("3. Limitation of Liability",
+         "RAA Capital Partners Sdn Bhd, Centre for AI Innovation (CEAI) and its advisory partners shall not be liable for any loss or damage arising from the use of AI-generated reports and insights. This includes, but is not limited to, any direct, indirect, incidental, or consequential damages resulting from reliance on the reports or decisions made based on them."),
+        
+        ("4. No Endorsement of Third-Party Tools",
+         "The use of third-party tools and data sources in AI evaluations is at the user's discretion. RAA Capital Partners Sdn Bhd, Centre for AI Innovation (CEAI) and its advisory partners do not endorse or guarantee the performance or accuracy of any third-party tools or data sources used in conjunction with the AI-generated reports.")
+    ]
+
+    for title, content in disclaimers:
+        elements.append(Paragraph(title, disclaimer_styles['item_header']))
+        elements.append(Paragraph(content, disclaimer_styles['body_text']))
+
+    # Add bottom line
+    elements.append(Table(
+        [['']],
+        colWidths=[7.5*inch],
+        style=TableStyle([
+            ('LINEABOVE', (0,0), (-1,0), 1, colors.black),
+        ])
+    ))
+
+    # Add "strictly confidential"
+    elements.append(Paragraph("strictly confidential", disclaimer_styles['confidential']))
 def clean_text(text):
     if not text:
         return ""
@@ -197,60 +399,193 @@ def create_highlight_box(text, styles):
             ('ALIGN', (0,0), (-1,-1), 'LEFT'),
         ])
     )
-def create_custom_styles():
-    """Create custom styles for the PDF with proper style inheritance"""
-    styles = getSampleStyleSheet()
+def create_second_page(styles, org_info):
+    """Create an enhanced front page with modern design elements"""
+    elements = []
     
-    # Custom paragraph styles
-    return {
+    # Add some space at the top
+    elements.append(Spacer(1, 1*inch))
+    
+    # Create a colored banner for the title
+    title_table = Table(
+        [[Paragraph("Profile Analysis", styles['title'])]],
+        colWidths=[7*inch],
+        style=TableStyle([
+            ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#F0F9FF')),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('TOPPADDING', (0, 0), (-1, -1), 30),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 30),
+            ('LEFTPADDING', (0, 0), (-1, -1), 20),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 20),
+            ('LINEABOVE', (0, 0), (-1, 0), 2, colors.HexColor('#2B6CB0')),
+            ('LINEBELOW', (0, 0), (-1, 0), 2, colors.HexColor('#2B6CB0')),
+        ])
+    )
+    elements.append(title_table)
+    
+    # Add space before organization info
+    elements.append(Spacer(1, 1*inch))
+    
+    # Create a styled box for organization info
+    org_info_content = [
+        [Paragraph("Organization Profile", styles['subheading'])],
+        [Table(
+            [
+                [
+                    Paragraph("Organization Type", 
+                             ParagraphStyle('Label', parent=styles['content'], textColor=colors.HexColor('#2B6CB0'), fontSize=12)),
+                    Paragraph(str(org_info.get('type', 'N/A')), styles['content'])
+                ],
+                [
+                    Paragraph("Industry Sector",
+                             ParagraphStyle('Label', parent=styles['content'], textColor=colors.HexColor('#2B6CB0'), fontSize=12)),
+                    Paragraph(str(org_info.get('sector', 'N/A')), styles['content'])  # Make sure we're using 'sector' here
+                ],
+                [
+                    Paragraph("Report Date",
+                             ParagraphStyle('Label', parent=styles['content'], textColor=colors.HexColor('#2B6CB0'), fontSize=12)),
+                    Paragraph(str(org_info.get('date', 'N/A')), styles['content'])
+                ]
+            ],
+            colWidths=[2*inch, 4*inch],
+            style=TableStyle([
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#E2E8F0')),
+                ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#F7FAFC')),
+                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                ('TOPPADDING', (0, 0), (-1, -1), 12),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 12),
+                ('LEFTPADDING', (0, 0), (-1, -1), 15),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 15),
+            ])
+        )]
+    ]
+    
+    info_table = Table(
+        org_info_content,
+        colWidths=[7*inch],
+        style=TableStyle([
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('BACKGROUND', (0, 0), (-1, -1), colors.white),
+            ('BOX', (0, 0), (-1, -1), 1, colors.HexColor('#90CDF4')),
+            ('TOPPADDING', (0, 0), (-1, -1), 20),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 20),
+            ('LEFTPADDING', (0, 0), (-1, -1), 30),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 30),
+        ])
+    )
+    elements.append(info_table)
+    
+    # Add decorative footer
+    elements.append(Spacer(1, 1*inch))
+    footer_text = ParagraphStyle(
+        'Footer',
+        parent=styles['content'],
+        alignment=TA_CENTER,
+        textColor=colors.HexColor('#4A5568'),
+        fontSize=9
+    )
+    elements.append(Paragraph(
+        "Prepared by Centre for AI Innovation (CEAI)",
+        footer_text
+    ))
+    elements.append(Paragraph(
+        f"Generated on {org_info.get('date', 'N/A')}",
+        footer_text
+    ))
+    
+    return elements
+def create_custom_styles():
+    base_styles = getSampleStyleSheet()
+    
+    try:
+        pdfmetrics.registerFont(TTFont('Lato', 'fonts/Lato-Regular.ttf'))
+        pdfmetrics.registerFont(TTFont('Lato-Bold', 'fonts/Lato-Bold.ttf'))
+        pdfmetrics.registerFont(TTFont('Lato-Italic', 'fonts/Lato-Italic.ttf'))
+        pdfmetrics.registerFont(TTFont('Lato-BoldItalic', 'fonts/Lato-BoldItalic.ttf'))
+        base_font = 'Lato'
+        bold_font = 'Lato-Bold'
+    except:
+        base_font = 'Helvetica'
+        bold_font = 'Helvetica-Bold'
+
+    styles = {
+        'Normal': base_styles['Normal'],
+        'TOCEntry': ParagraphStyle(
+            'TOCEntry',
+            parent=base_styles['Normal'],
+            fontSize=12,
+            leading=16,
+            leftIndent=20,
+            fontName=base_font
+        ),
         'title': ParagraphStyle(
             'CustomTitle',
-            parent=styles['Normal'],
+            parent=base_styles['Normal'],
             fontSize=24,
             textColor=colors.HexColor('#2B6CB0'),
             alignment=TA_CENTER,
             spaceAfter=30,
-            fontName='Helvetica-Bold'
+            fontName=bold_font,
+            leading=28.8
         ),
         'heading': ParagraphStyle(
             'CustomHeading',
-            parent=styles['Normal'],
-            fontSize=20,
+            parent=base_styles['Normal'],
+            fontSize=27,
             textColor=colors.HexColor('#1a1a1a'),
             spaceBefore=20,
             spaceAfter=15,
-            fontName='Helvetica-Bold'
+            fontName=bold_font,
+            leading=40.5,
+            tracking=0
         ),
         'subheading': ParagraphStyle(
             'CustomSubheading',
-            parent=styles['Normal'],
+            parent=base_styles['Normal'],
             fontSize=13,
             textColor=colors.HexColor('#4A5568'),
             spaceBefore=15,
             spaceAfter=10,
-            fontName='Helvetica-Bold'
+            fontName=bold_font,
+            leading=18.2
+        ),
+        'normal': ParagraphStyle(
+            'CustomNormal',
+            parent=base_styles['Normal'],
+            fontSize=11,
+            textColor=colors.HexColor('#1a1a1a'),
+            spaceBefore=6,
+            spaceAfter=6,
+            fontName=base_font,
+            leading=15.4,
+            tracking=0
         ),
         'content': ParagraphStyle(
             'CustomContent',
-            parent=styles['Normal'],
-            fontSize=10,
+            parent=base_styles['Normal'],
+            fontSize=11,
             textColor=colors.HexColor('#1a1a1a'),
             alignment=TA_JUSTIFY,
             spaceBefore=6,
             spaceAfter=6,
-            fontName='Helvetica'
+            fontName=base_font,
+            leading=15.4,
+            tracking=0
         ),
         'bullet': ParagraphStyle(
             'CustomBullet',
-            parent=styles['Normal'],
-            fontSize=10,
+            parent=base_styles['Normal'],
+            fontSize=11,
             textColor=colors.HexColor('#1a1a1a'),
             leftIndent=20,
             firstLineIndent=0,
-            fontName='Helvetica'
+            fontName=base_font,
+            leading=15.4,
+            tracking=0
         )
     }
-
+    
+    return styles
 def scale_image_to_fit(image_path, max_width, max_height):
     """Scale image to fit within maximum dimensions while maintaining aspect ratio."""
     from PIL import Image as PILImage
@@ -345,139 +680,154 @@ def process_content(content, styles, elements):
         else:
             elements.append(Paragraph(clean_para, styles['content']))
             elements.append(Spacer(1, 0.05*inch))
-def create_contact_page(styles):
-    """Create a beautifully designed contact page with fixed sizing."""
-    elements = []
+# def create_contact_page(styles):
+#     """Create a beautifully designed contact page with fixed sizing."""
+#     elements = []
     
-    # Add a page break before contact page
-    # elements.append(PageBreak())
+#     # Add a page break before contact page
+#     # elements.append(PageBreak())
     
-    # Create a colored background header
-    elements.append(
-        Table(
-            [[Paragraph("Get in Touch", styles['heading'])]], 
-            colWidths=[7*inch],
-            style=TableStyle([
-                ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#F0F9FF')),
-                ('BOTTOMPADDING', (0, 0), (-1, -1), 20),
-                ('TOPPADDING', (0, 0), (-1, -1), 20),
-                ('LEFTPADDING', (0, 0), (-1, -1), 30),
-            ])
-        )
-    )
-    elements.append(Spacer(1, 0.3*inch))
+#     # Create a colored background header
+#     elements.append(
+#         Table(
+#             [[Paragraph("Get in Touch", styles['heading'])]], 
+#             colWidths=[7*inch],
+#             style=TableStyle([
+#                 ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#F0F9FF')),
+#                 ('BOTTOMPADDING', (0, 0), (-1, -1), 20),
+#                 ('TOPPADDING', (0, 0), (-1, -1), 20),
+#                 ('LEFTPADDING', (0, 0), (-1, -1), 30),
+#             ])
+#         )
+#     )
+#     elements.append(Spacer(1, 0.3*inch))
 
-    # Profile photo
-    if os.path.exists("mizah.jpg"):
-        description_style = ParagraphStyle(
-            'ImageDescription',
-            parent=styles['content'],
-            fontSize=10,
-            textColor=colors.HexColor('#1a1a1a'),
-            alignment=TA_LEFT,
-            leading=14
-        )
+#     # Profile photo
+#     if os.path.exists("mizah.jpg"):
+#         description_style = ParagraphStyle(
+#             'ImageDescription',
+#             parent=styles['content'],
+#             fontSize=10,
+#             textColor=colors.HexColor('#1a1a1a'),
+#             alignment=TA_LEFT,
+#             leading=14
+#         )
         
-        description_text = Paragraph("""KerjayaKu: AI-Driven Career Guidance for a Strategic Future<br/>
-            KerjayaKu is an AI-powered portal designed to help fresh graduates and young professionals strategically navigate their career development journey. 
-            By integrating cutting-edge artificial intelligence, KerjayaKu assesses your education profile, aspirations, personality traits, current skillset, 
-            and problem-solving abilities, along with social-emotional learning skills. It then delivers personalized insights to help you stay competitive 
-            in today's dynamic job market.""", description_style)
+#         description_text = Paragraph("""KerjayaKu: AI-Driven Career Guidance for a Strategic Future<br/>
+#             KerjayaKu is an AI-powered portal designed to help fresh graduates and young professionals strategically navigate their career development journey. 
+#             By integrating cutting-edge artificial intelligence, KerjayaKu assesses your education profile, aspirations, personality traits, current skillset, 
+#             and problem-solving abilities, along with social-emotional learning skills. It then delivers personalized insights to help you stay competitive 
+#             in today's dynamic job market.""", description_style)
 
-        elements.append(
-            Table(
-                [
-                    [Image("mizah.jpg", width=1*inch, height=1*inch), ""],  # Image row
-                    [description_text, ""]  # Description row below image
-                ],
-                colWidths=[1.5*inch, 5.5*inch],
-                style=TableStyle([
-                    ('ALIGN', (0, 0), (0, 0), 'LEFT'),  # Align image to left
-                    ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-                    ('TOPPADDING', (0, 0), (-1, -1), 10),
-                    ('BOTTOMPADDING', (0, 0), (-1, -1), 10),
-                    ('LEFTPADDING', (0, 0), (-1, -1), 15),
-                    ('SPAN', (0, 1), (1, 1)),  # Span description across both columns
-                ])
-            )
-        )
-        elements.append(Spacer(1, 0.3*inch))
+#         elements.append(
+#             Table(
+#                 [
+#                     [Image("mizah.jpg", width=1*inch, height=1*inch), ""],  # Image row
+#                     [description_text, ""]  # Description row below image
+#                 ],
+#                 colWidths=[1.5*inch, 5.5*inch],
+#                 style=TableStyle([
+#                     ('ALIGN', (0, 0), (0, 0), 'LEFT'),  # Align image to left
+#                     ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+#                     ('TOPPADDING', (0, 0), (-1, -1), 10),
+#                     ('BOTTOMPADDING', (0, 0), (-1, -1), 10),
+#                     ('LEFTPADDING', (0, 0), (-1, -1), 15),
+#                     ('SPAN', (0, 1), (1, 1)),  # Span description across both columns
+#                 ])
+#             )
+#         )
+#         elements.append(Spacer(1, 0.3*inch))
 
-    # Contact information table
-    contact_table_data = [
-        # Label Cell, Value Cell
-        [Paragraph("Address:", styles['content']),
-         Paragraph("Centre for AI Innovation (CEAI) @Kuala Lumpur,\nc/o MyFinB (M) Sdn Bhd,\nLevel 13A, Menara Tokio Marine,\n189 Jalan Tun Razak, Hampshire Park,\n50450 Kuala Lumpur, Malaysia", styles['content'])],
-        
-        [Paragraph("Tel:", styles['content']),
-         Paragraph("+601117695760", styles['content'])],
-        
-        [Paragraph("Email:", styles['content']),
-         Paragraph('<link href="mailto:hamizah@ceaiglobal.com"><font color="#2563EB">hamizah@ceaiglobal.com</font></link>', styles['content'])],
-        
-        [Paragraph("Website:", styles['content']),
-         Paragraph('<link href="https://www.google.com/maps"><font color="#2563EB">www.ceaiglobal.com</font></link>', styles['content'])]
-    ]
+#     # Contact information table
+#     contact_table_data = [
+#         # Label Cell, Value Cell
+#         [Paragraph("Name:", styles['content']),
+#          Paragraph("Monica Tiara Mittra", styles['content'])],
 
-    # Create the contact information table
-    contact_table = Table(
-        contact_table_data,
-        colWidths=[1.5*inch, 5.8*inch],
-        style=TableStyle([
-            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-            ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#FFFFFF')),
-            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#E2E8F0')),
-            ('TEXTCOLOR', (0, 0), (0, -1), colors.HexColor('#2B6CB0')),  # Blue color for labels
-            ('TOPPADDING', (0, 0), (-1, -1), 12),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 12),
-            ('LEFTPADDING', (0, 0), (-1, -1), 15),
-            ('RIGHTPADDING', (0, 0), (-1, -1), 15),
-        ])
-    )
+#         [Paragraph("Address:", styles['content']),
+#          Paragraph("Project Coordinator,\nRAA Capital Partners Sdn Bhd", styles['content'])],
+        
+#         [Paragraph("Tel:", styles['content']),
+#          Paragraph("+60178833569", styles['content'])],
+        
+#         [Paragraph("Email:", styles['content']),
+#          Paragraph('<link href="mailto:monicamittra@raa-capital.com"><font color="#2563EB">monicamittra@raa-capital.com</font></link>', styles['content'])],
+        
+#         [Paragraph("Website:", styles['content']),
+#          Paragraph('<link href="https://www.google.com/maps"><font color="#2563EB">www.ceaiglobal.com</font></link>', styles['content'])]
+#     ]
+
+#     # Create the contact information table
+#     contact_table = Table(
+#         contact_table_data,
+#         colWidths=[1.5*inch, 5.8*inch],
+#         style=TableStyle([
+#             ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+#             ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+#             ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#FFFFFF')),
+#             ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#E2E8F0')),
+#             ('TEXTCOLOR', (0, 0), (0, -1), colors.HexColor('#2B6CB0')),  # Blue color for labels
+#             ('TOPPADDING', (0, 0), (-1, -1), 12),
+#             ('BOTTOMPADDING', (0, 0), (-1, -1), 12),
+#             ('LEFTPADDING', (0, 0), (-1, -1), 15),
+#             ('RIGHTPADDING', (0, 0), (-1, -1), 15),
+#         ])
+#     )
     
-    elements.append(contact_table)
+#     elements.append(contact_table)
     
-    # Footer
-    elements.extend([
-        Spacer(1, 0.5*inch),
-        Table(
-            [[Paragraph("Thank you for your interest!", 
-                       ParagraphStyle(
-                           'ThankYou',
-                           parent=styles['subheading'],
-                           alignment=TA_CENTER,
-                           textColor=colors.HexColor('#2B6CB0')
-                       ))]],
-            colWidths=[7*inch],
-            style=TableStyle([
-                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-                ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#F0F9FF')),
-                ('BOTTOMPADDING', (0, 0), (-1, -1), 15),
-                ('TOPPADDING', (0, 0), (-1, -1), 15),
-            ])
-        ),
-        # Spacer(1, 0.2*inch),
-        # Table(
-        #     [[Paragraph("© 2024 Centre for AI Innovation. All rights reserved.", 
-        #                ParagraphStyle(
-        #                    'Footer',
-        #                    parent=styles['content'],
-        #                    alignment=TA_CENTER,
-        #                    textColor=colors.HexColor('#666666'),
-        #                    fontSize=8
-        #                ))]],
-        #     colWidths=[7*inch],
-        #     style=TableStyle([
-        #         ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-        #     ])
-        # )
-    ])
+#     # Footer
+#     elements.extend([
+#         Spacer(1, 0.5*inch),
+#         Table(
+#             [[Paragraph("Thank you for your interest!", 
+#                        ParagraphStyle(
+#                            'ThankYou',
+#                            parent=styles['subheading'],
+#                            alignment=TA_CENTER,
+#                            textColor=colors.HexColor('#2B6CB0')
+#                        ))]],
+#             colWidths=[7*inch],
+#             style=TableStyle([
+#                 ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+#                 ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#F0F9FF')),
+#                 ('BOTTOMPADDING', (0, 0), (-1, -1), 15),
+#                 ('TOPPADDING', (0, 0), (-1, -1), 15),
+#             ])
+#         ),
+#         # Spacer(1, 0.2*inch),
+#         # Table(
+#         #     [[Paragraph("© 2024 Centre for AI Innovation. All rights reserved.", 
+#         #                ParagraphStyle(
+#         #                    'Footer',
+#         #                    parent=styles['content'],
+#         #                    alignment=TA_CENTER,
+#         #                    textColor=colors.HexColor('#666666'),
+#         #                    fontSize=8
+#         #                ))]],
+#         #     colWidths=[7*inch],
+#         #     style=TableStyle([
+#         #         ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+#         #     ])
+#         # )
+#     ])
     
-    return elements
+#     return elements
 def create_header_footer(canvas, doc):
     """Add header and footer with smaller, transparent images in the top right and a line below the header."""
     canvas.saveState()
+    
+    # Register Lato fonts if available
+    try:
+        pdfmetrics.registerFont(TTFont('Lato', 'fonts/Lato-Regular.ttf'))
+        pdfmetrics.registerFont(TTFont('Lato-Bold', 'fonts/Lato-Bold.ttf'))
+        base_font = 'Lato'
+        bold_font = 'Lato-Bold'
+    except:
+        # Fallback to Helvetica if Lato fonts are not available
+        base_font = 'Helvetica'
+        bold_font = 'Helvetica-Bold'
+    
     if doc.page > 1:  # Only show on pages after the first page
         # Adjust the position to the top right
         x_start = doc.width + doc.leftMargin - 1.0 * inch  # Align closer to the right
@@ -493,13 +843,13 @@ def create_header_footer(canvas, doc):
                 y_position, 
                 width=image_width, 
                 height=image_height, 
-                mask="auto"  # Enable transparency for PNGs
+                mask="auto"
             )
         
         if os.path.exists("raa.png"):
             canvas.drawImage(
                 "raa.png", 
-                x_start - image_width - 0.1 * inch,  # Adjust for stacking to the left
+                x_start - image_width - 0.1 * inch,
                 y_position, 
                 width=image_width, 
                 height=image_height, 
@@ -509,15 +859,15 @@ def create_header_footer(canvas, doc):
         if os.path.exists("emma.png"):
             canvas.drawImage(
                 "emma.png", 
-                x_start - 2 * (image_width + 0.1 * inch),  # Adjust for stacking to the left
+                x_start - 2 * (image_width + 0.1 * inch),
                 y_position, 
                 width=image_width, 
                 height=image_height, 
                 mask="auto"
             )
         
-        # Add Header Text
-        canvas.setFont('Helvetica-Bold', 10)
+        # Add Header Text using Lato Bold
+        canvas.setFont(bold_font, 24)
         canvas.drawString(doc.leftMargin, doc.height + doc.topMargin - 0.1*inch, 
                          "ESG Starter's Kit")
 
@@ -526,12 +876,83 @@ def create_header_footer(canvas, doc):
         canvas.setLineWidth(0.5)
         canvas.line(doc.leftMargin, line_y_position, doc.width + doc.rightMargin, line_y_position)
 
-        # Footer
-        canvas.setFont('Helvetica', 9)
+        # Footer using regular Lato
+        canvas.setFont(base_font, 9)
         canvas.drawString(doc.leftMargin, 0.5 * inch, 
                           f"Generated on {datetime.datetime.now().strftime('%B %d, %Y')}")
         canvas.drawRightString(doc.width + doc.rightMargin, 0.5 * inch, 
                                f"Page {doc.page}")
+    canvas.restoreState()
+def create_header_footer_disclaimer(canvas, doc):
+    """Add header and footer with smaller, transparent images in the top right and a line below the header."""
+    canvas.saveState()
+    
+    # Register Lato fonts if available
+    try:
+        pdfmetrics.registerFont(TTFont('Lato', 'fonts/Lato-Regular.ttf'))
+        pdfmetrics.registerFont(TTFont('Lato-Bold', 'fonts/Lato-Bold.ttf'))
+        base_font = 'Lato'
+        bold_font = 'Lato-Bold'
+    except:
+        # Fallback to Helvetica if Lato fonts are not available
+        base_font = 'Helvetica'
+        bold_font = 'Helvetica-Bold'
+    
+    if doc.page > 1:  # Only show on pages after the first page
+        # Adjust the position to the top right
+        x_start = doc.width + doc.leftMargin - 1.0 * inch  # Align closer to the right
+        y_position = doc.height + doc.topMargin - 0.1 * inch  # Slightly below the top margin
+        image_width = 0.5 * inch  # Smaller width
+        image_height = 0.5 * inch  # Smaller height
+
+        # Draw images (ensure they are saved with transparent backgrounds)
+        if os.path.exists("ceai.png"):
+            canvas.drawImage(
+                "ceai.png", 
+                x_start, 
+                y_position, 
+                width=image_width, 
+                height=image_height, 
+                mask="auto"
+            )
+        
+        if os.path.exists("raa.png"):
+            canvas.drawImage(
+                "raa.png", 
+                x_start - image_width - 0.1 * inch,
+                y_position, 
+                width=image_width, 
+                height=image_height, 
+                mask="auto"
+            )
+        
+        if os.path.exists("emma.png"):
+            canvas.drawImage(
+                "emma.png", 
+                x_start - 2 * (image_width + 0.1 * inch),
+                y_position, 
+                width=image_width, 
+                height=image_height, 
+                mask="auto"
+            )
+        
+        # Add Header Text - Fixed by properly setting font name and size
+        canvas.setFont(bold_font, 27)  # Set font with name and size
+        canvas.drawString(doc.leftMargin, doc.height + doc.topMargin - 0.1*inch, 
+                         "Disclaimer")
+
+        # Draw line below the header text
+        line_y_position = doc.height + doc.topMargin - 0.30 * inch
+        canvas.setLineWidth(0.5)
+        canvas.line(doc.leftMargin, line_y_position, doc.width + doc.rightMargin, line_y_position)
+
+        # Footer - Fixed by properly setting font name and size
+        canvas.setFont(base_font, 9)  # Set font with name and size
+        canvas.drawString(doc.leftMargin, 0.5 * inch, 
+                         f"Generated on {datetime.datetime.now().strftime('%B %d, %Y')}")
+        canvas.drawRightString(doc.width + doc.rightMargin, 0.5 * inch, 
+                             f"Page {doc.page}")
+    
     canvas.restoreState()
 def get_esg_analysis1(user_data, api_key):
     """Initial ESG analysis based on profile"""
@@ -540,7 +961,7 @@ def get_esg_analysis1(user_data, api_key):
     prompt = f"""Based on this organization's profile and ESG readiness responses:
     {user_data}
     
-    Provide a 730-word analysis with specific references to the data provided, formatted
+    Provide a 600-word analysis with specific references to the data provided, formatted
     in narrative form with headers and paragraphs."""
 
     try:
@@ -650,7 +1071,7 @@ Please provide:
 4. Recommendations for prioritizing and harmonizing framework implementation
 5. Specific examples of how the organization can benefit from its multi-framework approach
 
-Write in narrative form (680 words) with headers and bullet points, including:
+Write in narrative form (650 words) with headers and bullet points, including:
 - Supporting facts and figures
 - Specific references for each organization type
 - Cross-framework integration strategies
@@ -677,7 +1098,7 @@ def generate_management_questions(analysis1, analysis2, api_key):
     {analysis2}
     
     Generate a list of top 10 issues/questions that Management should address.
-    Format as  700-words in narrative form with:
+    Format as  600-words in narrative form with:
     - Clear headers for key areas
     - Bullet points identifying specific issues
     - Supporting facts and figures
@@ -703,7 +1124,7 @@ def generate_question_rationale(questions, analysis1, analysis2, api_key):
     {analysis1}
     {analysis2}
     
-    Provide a 750-word explanation of why each issue needs to be addressed, with:
+    Provide a 650-word explanation of why each issue needs to be addressed, with:
     - Specific references to ESG guidelines and standards
     - Industry best practices
     - Supporting facts and figures
@@ -729,7 +1150,7 @@ def generate_implementation_challenges(analysis1, analysis2, questions, api_key)
     {analysis2}
     {questions}
     
-    Provide a 700-word analysis of potential ESG implementation challenges covering:
+    Provide a 660-word analysis of potential ESG implementation challenges covering:
     1. Human Capital Availability and Expertise
     2. Budgeting and Financial Resources
     3. Infrastructure
@@ -757,7 +1178,7 @@ def generate_advisory_analysis(user_data, all_analyses, api_key):
     {user_data}
     {all_analyses}
     
-     (690 words): Explain what and how ESG Advisory team can assist, including:
+     (570 words): Explain what and how ESG Advisory team can assist, including:
     - Implementation support methods
     - Technical expertise areas
     - Training programs
@@ -783,7 +1204,7 @@ def generate_sroi_analysis(user_data, all_analyses, api_key):
     {user_data}
     {all_analyses}
     
-    (700 words): Provide a Social Return on Investment (SROI) model with:
+    (740 words): Provide a Social Return on Investment (SROI) model with:
     1. Calculation Methodology:
     - Explain SROI calculations using plain text (avoid mathematical notation)
     - Example: "For every 1 dollar invested, X value is generated" instead of mathematical formulas
@@ -1034,8 +1455,8 @@ def main():
                                         'type': ', '.join(st.session_state.user_data['organization_types']),
                                         'date': datetime.datetime.now().strftime('%B %d, %Y')
                                     }
-                                    
-                                    pdf_buffer = generate_pdf(esg_data, personal_info)
+                                    page_numbers = [4, 7, 10, 13, 16, 19] 
+                                    pdf_buffer = generate_pdf(esg_data, personal_info,page_numbers)
                                     
                                     # Download button
                                     st.download_button(
