@@ -832,7 +832,7 @@ def get_esg_analysis1(user_data, api_key):
     prompt = f"""Based on this organization's profile and ESG readiness responses:
     {user_data}
     
-    Provide a 565-word analysis with specific references to the data provided, formatted
+    Provide a 535-word analysis with specific references to the data provided, formatted
     in narrative form with headers and paragraphs.NO NUMBERING POINTS"""
 
     try:
@@ -942,7 +942,7 @@ Please provide:
 4. Recommendations for prioritizing and harmonizing framework implementation
 5. Specific examples of how the organization can benefit from its multi-framework approach
 
-Write in narrative form (500 words) with headers and Numbering points(no bullet points), including:
+Write in narrative form (450 words) with headers and Numbering points(no bullet points), including:
 - Supporting facts and figures
 - Specific references for each organization type
 - Cross-framework integration strategies
@@ -969,7 +969,7 @@ def generate_management_questions(analysis1, analysis2, api_key):
     {analysis2}
     
     Generate a list of top 10 issues/questions that Management should address in numbering Points.
-    Format as  380-words in narrative form with:
+    Format as  650-words in narrative form with:
     - Clear headers for key areas
     - Bullet points identifying specific issues
     - Supporting facts and figures
@@ -995,7 +995,7 @@ def generate_question_rationale(questions, analysis1, analysis2, api_key):
     {analysis1}
     {analysis2}
     
-    Provide a 640-word (no numbering points)explanation of why each issue needs to be addressed, with:
+    Provide a 680-word (no numbering points)explanation of why each issue needs to be addressed, with:
     - Specific references to ESG guidelines and standards
     - Industry best practices
     - Supporting facts and figures
@@ -1021,7 +1021,7 @@ def generate_implementation_challenges(analysis1, analysis2, questions, api_key)
     {analysis2}
     {questions}
     
-    Provide a 640-word(no numbering points) analysis of potential ESG implementation challenges covering:
+    Provide a 680-word(no numbering points) analysis of potential ESG implementation challenges covering:
     1. Human Capital Availability and Expertise
     2. Budgeting and Financial Resources
     3. Infrastructure
